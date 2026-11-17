@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-rarewolf-primary: #b5121b;
+  --color-rarewolf-primary-hover: #970e16;
+  --color-rarewolf-primary-dark: #780a10;
+  --color-rarewolf-primary-light: #fbe8e9;
+
+  --color-canvas: #faf7f5;
+  --color-soft: #f8f5f3;
+  --color-surface: #ffffff;
+  --color-line: #e7e2df;
+  --color-ink: #171717;
+  --color-ink-secondary: #666666;
+  --color-ink-muted: #8a8a8a;
+  --color-footer: #1c1f1f;
+
+  --color-success: #16845b;
+  --color-warning: #d98a00;
+  --color-danger: #c62828;
+  --color-rating: #f59e0b;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 2px 8px rgb(0 0 0 / 0.04);
+  --shadow-card-hover: 0 6px 20px rgb(0 0 0 / 0.1);
+  --shadow-cta: 0 4px 16px rgb(181 18 27 / 0.28);
+}
+
+@layer base {
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-rarewolf-primary;
+  }
+}
