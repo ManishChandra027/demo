@@ -3,11 +3,35 @@ import ApiResponse from "../utils/ApiResponse.js";
 import * as orderService from "../services/order.service.js";
 
 const createOrder = asyncHandler(async (req, res) => {
-    const order = await orderService.createOrderFromCart(
+    if (req.body.paymentMethod === "razorpay") {
+        const result = await orderService.createRazorpayOrderFromCart(
+            req.user._id,
+            req.body.addressId
+        );
+        return res.status(201).json(
+            new ApiResponse(201, result, "Continue to Razorpay to complete your payment.")
+        );
+    }
+
+    const order = await orderService.createOrderFromCart(req.user._id, req.body.addressId);
+    return res.status(201).json(new ApiResponse(201, { order }, "Order placed successfully."));
+});
+
+const createRazorpayPayment = asyncHandler(async (req, res) => {
+    const result = await orderService.createRazorpayPaymentForOrder(
         req.user._id,
-        req.body.addressId
+        req.params.orderId
     );
-    res.status(201).json(new ApiResponse(201, { order }, "Order placed successfully."));
+    res.status(201).json(new ApiResponse(201, result, "Razorpay payment is ready."));
+});
+
+const verifyRazorpayPayment = asyncHandler(async (req, res) => {
+    const order = await orderService.verifyRazorpayPaymentForOrder(
+        req.user._id,
+        req.params.orderId,
+        req.body
+    );
+    res.status(200).json(new ApiResponse(200, { order }, "Payment verified successfully."));
 });
 
 const getMyOrders = asyncHandler(async (req, res) => {
@@ -25,4 +49,11 @@ const cancelMyOrder = asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, { order }, "Order cancelled successfully."));
 });
 
-export { cancelMyOrder, createOrder, getMyOrder, getMyOrders };
+export {
+    cancelMyOrder,
+    createOrder,
+    createRazorpayPayment,
+    getMyOrder,
+    getMyOrders,
+    verifyRazorpayPayment,
+};

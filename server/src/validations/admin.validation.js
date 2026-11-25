@@ -78,7 +78,7 @@ export const adminLowStockQuerySchema = Joi.object({
 }).unknown(false);
 
 export const adminOrderListSchema = Joi.object({
-    status: Joi.string().valid("all", "placed", "processing", "shipped", "delivered", "cancelled").default("all"),
+    status: Joi.string().valid("all", "payment_pending", "placed", "processing", "shipped", "delivered", "cancelled").default("all"),
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(50).default(20),
 }).unknown(false);

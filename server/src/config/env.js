@@ -24,6 +24,9 @@ const validateEnvironment = (env = process.env) => {
     if (missing.length) {
         throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
     }
+    if (Boolean(env.RAZORPAY_KEY_ID?.trim()) !== Boolean(env.RAZORPAY_KEY_SECRET?.trim())) {
+        throw new Error("RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be configured together.");
+    }
 
     if (env.NODE_ENV && !["development", "test", "production"].includes(env.NODE_ENV)) {
         throw new Error("NODE_ENV must be development, test, or production.");

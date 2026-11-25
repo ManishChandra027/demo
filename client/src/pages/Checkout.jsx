@@ -10,7 +10,8 @@ import { selectIsAuthenticated } from "../features/auth/authSelector";
 import { setCart } from "../features/cart/cartSlice";
 import { getAddresses, createAddress } from "../services/addressService";
 import { getCurrentCart } from "../services/catalogService";
-import { createOrder } from "../services/orderService";
+import { createOrder, verifyRazorpayPayment } from "../services/orderService";
+import { openRazorpayCheckout } from "../lib/razorpay";
 import { toast } from "sonner";
 
 const blankAddress = {
@@ -37,6 +38,7 @@ const Checkout = () => {
   const [loadError, setLoadError] = useState("");
   const [savingAddress, setSavingAddress] = useState(false);
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("cod");
 
   useEffect(() => {
     if (!isAuthenticated) return undefined;
@@ -98,13 +100,44 @@ const Checkout = () => {
   const handlePlaceOrder = async () => {
     if (!selectedAddressId || placingOrder) return;
     setPlacingOrder(true);
+    let order;
+    let confirmedOrder;
     try {
-      const response = await createOrder(selectedAddressId);
-      const order = response?.data?.order;
+      const response = await createOrder(selectedAddressId, paymentMethod);
+      order = response?.data?.order;
       if (!order?._id) throw new Error("Order confirmation could not be loaded.");
+
+      if (paymentMethod === "cod") {
+        dispatch(setCart(null));
+        navigate(`/orders/${order._id}/confirmation`, { state: { order }, replace: true });
+        return;
+      }
+
       dispatch(setCart(null));
-      navigate(`/orders/${order._id}/confirmation`, { state: { order }, replace: true });
+      const payment = {
+        keyId: response.data.keyId,
+        payment: response.data.payment,
+      };
+      const completed = await openRazorpayCheckout({
+        order,
+        payment,
+        onSuccess: async (paymentDetails) => {
+          const verification = await verifyRazorpayPayment(order._id, paymentDetails);
+          confirmedOrder = verification?.data?.order;
+          if (!confirmedOrder?._id) throw new Error("Payment confirmation could not be loaded.");
+        },
+      });
+      if (completed) {
+        navigate(`/orders/${order._id}/confirmation`, { state: { order: confirmedOrder }, replace: true });
+      } else {
+        navigate(`/orders/${order._id}`, { state: { order }, replace: true });
+        toast.info("Payment was not completed. You can retry it from your order.");
+      }
     } catch (error) {
+      if (order?._id) {
+        dispatch(setCart(null));
+        navigate(`/orders/${order._id}`, { state: { order }, replace: true });
+      }
       toast.error(error.message || "Unable to place your order.");
     } finally {
       setPlacingOrder(false);
@@ -197,10 +230,17 @@ const Checkout = () => {
 
           <section className="rounded-2xl border border-line bg-white p-5 shadow-card sm:p-6">
             <h2 className="text-lg font-bold text-ink">Payment method</h2>
-            <div className="mt-4 flex items-start gap-3 rounded-xl border border-rarewolf-primary bg-rarewolf-primary-light/30 p-4">
-              <input type="radio" checked readOnly aria-label="Cash on Delivery" className="mt-1 accent-rarewolf-primary" />
-              <div><p className="font-semibold text-ink">Cash on Delivery (COD)</p><p className="mt-1 text-sm text-ink-secondary">Pay when your order arrives. Online payment is not enabled yet.</p></div>
-            </div>
+            <fieldset className="mt-4 space-y-3">
+              <legend className="sr-only">Choose a payment method</legend>
+              <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${paymentMethod === "cod" ? "border-rarewolf-primary bg-rarewolf-primary-light/30" : "border-line hover:bg-soft"}`}>
+                <input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === "cod"} onChange={() => setPaymentMethod("cod")} className="mt-1 accent-rarewolf-primary" />
+                <span><span className="font-semibold text-ink">Cash on Delivery (COD)</span><span className="mt-1 block text-sm text-ink-secondary">Pay when your order arrives.</span></span>
+              </label>
+              <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${paymentMethod === "razorpay" ? "border-rarewolf-primary bg-rarewolf-primary-light/30" : "border-line hover:bg-soft"}`}>
+                <input type="radio" name="paymentMethod" value="razorpay" checked={paymentMethod === "razorpay"} onChange={() => setPaymentMethod("razorpay")} className="mt-1 accent-rarewolf-primary" />
+                <span><span className="font-semibold text-ink">Pay online with Razorpay</span><span className="mt-1 block text-sm text-ink-secondary">UPI, cards, net banking and supported wallets.</span></span>
+              </label>
+            </fieldset>
           </section>
         </div>
 
@@ -219,7 +259,7 @@ const Checkout = () => {
             <p className="flex justify-between text-ink-secondary"><span>Delivery</span><span className="font-semibold text-ink">₹0</span></p>
             <p className="flex justify-between border-t border-line pt-3 text-base font-bold text-ink"><span>Total</span><span>₹{subtotal.toLocaleString("en-IN")}</span></p>
           </div>
-          <Button type="button" fullWidth className="mt-5" loading={placingOrder} disabled={placingOrder || !selectedAddressId || addingAddress} onClick={handlePlaceOrder}>Place COD order</Button>
+          <Button type="button" fullWidth className="mt-5" loading={placingOrder} disabled={placingOrder || !selectedAddressId || addingAddress} onClick={handlePlaceOrder}>{paymentMethod === "cod" ? "Place COD order" : "Pay securely with Razorpay"}</Button>
           <Link to="/cart" className="mt-4 block text-center text-sm font-semibold text-rarewolf-primary hover:underline">Back to cart</Link>
         </aside>
       </div>

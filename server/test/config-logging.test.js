@@ -52,6 +52,15 @@ test("environment validator accepts production-shaped settings and rejects unsaf
   const missingMail = validEnv();
   delete missingMail.SMTP_PASS;
   assert.throws(() => validateEnvironment(missingMail), /SMTP_PASS/);
+
+  const partialRazorpayConfig = validEnv();
+  partialRazorpayConfig.RAZORPAY_KEY_ID = "rzp_test_example";
+  assert.throws(() => validateEnvironment(partialRazorpayConfig), /must be configured together/i);
+
+  const completeRazorpayConfig = validEnv();
+  completeRazorpayConfig.RAZORPAY_KEY_ID = "rzp_test_example";
+  completeRazorpayConfig.RAZORPAY_KEY_SECRET = "test-secret";
+  assert.doesNotThrow(() => validateEnvironment(completeRazorpayConfig));
 });
 
 test("structured logs omit sensitive and unapproved fields", () => {

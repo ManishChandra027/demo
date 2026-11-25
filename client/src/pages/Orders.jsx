@@ -68,7 +68,7 @@ const Orders = () => {
             <li key={order._id} className="rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-4">
                 <div><p className="text-xs text-ink-muted">Order placed {new Date(order.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</p><p className="mt-1 text-xs text-ink-secondary">Order #{order._id.slice(-8).toUpperCase()}</p></div>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${order.status === "cancelled" ? "bg-red-50 text-danger" : "bg-green-50 text-success"}`}>{order.status}</span>
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${order.status === "cancelled" ? "bg-red-50 text-danger" : order.status === "payment_pending" ? "bg-amber-50 text-amber-700" : "bg-green-50 text-success"}`}>{order.status.replace("_", " ")}</span>
               </div>
               <div className="flex items-center justify-between gap-4 pt-4">
                 <div className="flex min-w-0 items-center gap-3">

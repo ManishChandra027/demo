@@ -7,7 +7,13 @@ import { useSelector } from "react-redux";
 import Button from "../components/common/Button";
 import Loader from "../components/common/Loader";
 import { selectIsAuthenticated } from "../features/auth/authSelector";
-import { cancelOrder, getOrder } from "../services/orderService";
+import {
+  cancelOrder,
+  createRazorpayPayment,
+  getOrder,
+  verifyRazorpayPayment,
+} from "../services/orderService";
+import { openRazorpayCheckout } from "../lib/razorpay";
 
 const OrderDetails = ({ confirmation = false }) => {
   const { orderId } = useParams();
@@ -19,6 +25,7 @@ const OrderDetails = ({ confirmation = false }) => {
     error: "",
   }));
   const [cancelling, setCancelling] = useState(false);
+  const [retryingPayment, setRetryingPayment] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -61,6 +68,40 @@ const OrderDetails = ({ confirmation = false }) => {
     }
   };
 
+  const handleRetryPayment = async () => {
+    if (retryingPayment) return;
+    setRetryingPayment(true);
+    try {
+      const response = await createRazorpayPayment(orderId);
+      const payment = response?.data;
+      if (payment?.alreadyPaid) {
+        setOrderResult({ orderId, order: payment.order, error: "" });
+        toast.success("Payment verified successfully.");
+        return;
+      }
+      const completed = await openRazorpayCheckout({
+        order: payment.order,
+        payment,
+        onSuccess: async (paymentDetails) => {
+          const verification = await verifyRazorpayPayment(orderId, paymentDetails);
+          const paidOrder = verification?.data?.order;
+          if (!paidOrder?._id) throw new Error("Payment confirmation could not be loaded.");
+          setOrderResult({ orderId, order: paidOrder, error: "" });
+        },
+      });
+      if (completed) {
+        setRetryKey((current) => current + 1);
+        toast.success("Payment verified successfully.");
+      } else {
+        toast.info("Payment was not completed. You can try again.");
+      }
+    } catch (requestError) {
+      toast.error(requestError.message || "Unable to complete online payment.");
+    } finally {
+      setRetryingPayment(false);
+    }
+  };
+
   if (!isAuthenticated) {
     return <section className="rounded-2xl border border-line bg-white p-8 text-center"><h1 className="font-bold text-ink">Sign in to view this order</h1><Link to="/login" state={{ from: location.pathname }} className="mt-4 inline-block text-sm font-semibold text-rarewolf-primary">Sign in</Link></section>;
   }
@@ -72,19 +113,26 @@ const OrderDetails = ({ confirmation = false }) => {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
-      {confirmation && order.status !== "cancelled" && (
+      {confirmation && order.status === "payment_pending" && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center sm:p-8">
+          <p className="text-sm font-semibold uppercase tracking-wider text-amber-700">Payment pending</p>
+          <h1 className="mt-1 text-2xl font-bold text-ink">Complete payment to confirm your order</h1>
+          <p className="mt-2 text-sm text-ink-secondary">Your items are reserved while you complete Razorpay payment.</p>
+        </section>
+      )}
+      {confirmation && order.status !== "cancelled" && order.status !== "payment_pending" && (
         <section className="rounded-2xl border border-green-200 bg-green-50 p-6 text-center sm:p-8">
           <CheckCircle2 size={42} className="mx-auto text-success" />
           <p className="mt-3 text-sm font-semibold uppercase tracking-wider text-success">Order placed</p>
           <h1 className="mt-1 text-2xl font-bold text-ink">Thank you for your order!</h1>
-          <p className="mt-2 text-sm text-ink-secondary">Order #{order._id.slice(-8).toUpperCase()} · Payment: Cash on Delivery</p>
+          <p className="mt-2 text-sm text-ink-secondary">Order #{order._id.slice(-8).toUpperCase()} · Payment: {order.paymentMethod === "razorpay" ? "Razorpay" : "Cash on Delivery"}</p>
         </section>
       )}
 
       <section className="rounded-2xl border border-line bg-white p-5 shadow-card sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-4">
           <div><h1 className="text-xl font-bold text-ink">Order details</h1><p className="mt-1 text-sm text-ink-muted">Placed {new Date(order.createdAt).toLocaleString("en-IN")}</p></div>
-          <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${order.status === "cancelled" ? "bg-red-50 text-danger" : "bg-green-50 text-success"}`}>{order.status}</span>
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${order.status === "cancelled" ? "bg-red-50 text-danger" : order.status === "payment_pending" ? "bg-amber-50 text-amber-700" : "bg-green-50 text-success"}`}>{order.status.replace("_", " ")}</span>
         </div>
 
         <ul className="divide-y divide-line">
@@ -99,12 +147,13 @@ const OrderDetails = ({ confirmation = false }) => {
 
         <div className="grid gap-5 border-t border-line pt-5 sm:grid-cols-2">
           <div><h2 className="flex items-center gap-2 font-semibold text-ink"><MapPin size={16} /> Delivery address</h2><address className="mt-2 text-sm not-italic leading-6 text-ink-secondary">{order.deliveryAddress.fullName}<br />{order.deliveryAddress.addressLine1}<br />{order.deliveryAddress.city}, {order.deliveryAddress.state} {order.deliveryAddress.pinCode}<br />{order.deliveryAddress.phone}<br />{order.deliveryAddress.country}</address></div>
-          <div><h2 className="flex items-center gap-2 font-semibold text-ink"><PackageCheck size={16} /> Payment and total</h2><p className="mt-2 text-sm text-ink-secondary">Cash on Delivery · Payment {order.paymentStatus}</p><p className="mt-2 text-lg font-bold text-ink">₹{Number(order.totalAmount).toLocaleString("en-IN")}</p></div>
+          <div><h2 className="flex items-center gap-2 font-semibold text-ink"><PackageCheck size={16} /> Payment and total</h2><p className="mt-2 text-sm text-ink-secondary">{order.paymentMethod === "razorpay" ? "Razorpay" : "Cash on Delivery"} · Payment {order.paymentStatus}</p><p className="mt-2 text-lg font-bold text-ink">₹{Number(order.totalAmount).toLocaleString("en-IN")}</p></div>
         </div>
 
         <div className="mt-6 flex flex-wrap gap-3 border-t border-line pt-5">
           <Link to="/orders" className="inline-flex h-10 items-center rounded-lg border border-line px-4 text-sm font-semibold text-ink hover:bg-soft">All orders</Link>
-          {order.status === "placed" && <Button type="button" variant="danger" size="sm" loading={cancelling} disabled={cancelling} onClick={handleCancel}>Cancel order</Button>}
+          {order.status === "payment_pending" && order.paymentMethod === "razorpay" && <Button type="button" size="sm" loading={retryingPayment} disabled={retryingPayment} onClick={handleRetryPayment}>Retry Razorpay payment</Button>}
+          {(order.status === "payment_pending" || (order.status === "placed" && (order.paymentMethod !== "razorpay" || order.paymentStatus !== "paid"))) && <Button type="button" variant="danger" size="sm" loading={cancelling} disabled={cancelling} onClick={handleCancel}>Cancel order</Button>}
           <Link to="/products" className="inline-flex h-10 items-center rounded-lg px-3 text-sm font-semibold text-rarewolf-primary hover:underline">Continue shopping</Link>
         </div>
       </section>

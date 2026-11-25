@@ -10,6 +10,10 @@ The app requires a MongoDB database. It creates indexes from Mongoose models and
 
 `server/.env.example` lists every required API setting: `MONGO_URL`, distinct `ACCESS_TOKEN_SECRET` and `REFRESH_TOKEN_SECRET`, both token expiry values, `CORS_ORIGIN`, `CLIENT_URL`, SMTP host/port/security/user/password/from address, and Cloudinary cloud name/key/secret. `PORT` defaults to `8000`; `TRUST_PROXY_HOPS` is optional and must match the number of trusted proxies. Production token secrets must be different random strings of at least 32 characters. The application selects the `rarewolfDB` database name in code, so use a dedicated throwaway MongoDB deployment for destructive/integration checks rather than pointing tests or provisioning at production.
 
+### Razorpay checkout
+
+Checkout supports both Cash on Delivery and Razorpay. To enable online payments, get the **Key ID** and **Key Secret** from Razorpay Dashboard → Account & Settings → API Keys and add both to `server/.env` as `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET`. Use Test Mode keys for testing and replace them with Live Mode keys only after Razorpay account activation. Restart the API after changing `.env`. Both values must be set together; they are optional so COD continues working without them. Never put the Key Secret in the client environment or commit either credential. Razorpay payment signatures and captured payment amounts are verified by the API before an order is marked paid.
+
 ## Commands
 
 From `server`:
@@ -39,7 +43,7 @@ Publish `client/dist` with SPA history fallback enabled. Route `/api/*` to the s
 5. Before launch, replace all sample catalogue descriptions, prices/specifications and placeholder imagery in `src/data/catalog.json` with approved product content; import only after confirming the target database. Verify product images are approved and uploaded through the admin UI/Cloudinary.
 6. Run `npm test` in `server`, then `npm run lint` and `npm run build` in `client`. Exercise browse, cart, checkout, order history, stock changes and cancellation using a disposable database and test accounts before release.
 
-V1 admin orders use COD and keep payment status read-only. Promotions, paid/revenue analytics, exports, audit-log UI, multiple admin roles, warehouses and payment gateway support are deferred. The admin dashboard intentionally omits revenue totals until payment verification exists.
+Admin orders support COD and Razorpay; payment status remains read-only in the admin UI. Promotions, paid/revenue analytics, exports, audit-log UI, multiple admin roles and warehouses are deferred. The admin dashboard intentionally omits revenue totals.
 
 ## Logging
 

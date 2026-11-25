@@ -4,6 +4,14 @@ import Category from "../models/category.model.js";
 import Order from "../models/order.model.js";
 import Product from "../models/product.model.js";
 import ApiError from "../utils/ApiError.js";
+import {
+    captureRazorpayPayment,
+    createRazorpayOrder,
+    getRazorpayKeyId,
+    getRazorpayOrderPayments,
+    getRazorpayPayment,
+    verifyRazorpaySignature,
+} from "./razorpay.service.js";
 
 const toMoney = (amount) => Math.round((amount + Number.EPSILON) * 100) / 100;
 
@@ -47,7 +55,7 @@ const restoreReservations = async (reservations) => {
     }
 };
 
-const createOrderFromCart = async (userId, addressId) => {
+const createOrderFromCartWithPayment = async (userId, addressId, paymentMethod) => {
     const [cart, address] = await Promise.all([
         Cart.findOne({ user: userId }).populate({
             path: "items.product",
@@ -63,6 +71,7 @@ const createOrderFromCart = async (userId, addressId) => {
     const orderItems = [];
     const reservations = [];
     let order;
+    let payment = null;
     let subtotal = 0;
 
     try {
@@ -124,10 +133,16 @@ const createOrderFromCart = async (userId, addressId) => {
             subtotal,
             shippingAmount: 0,
             totalAmount: subtotal,
-            paymentMethod: "cod",
+            paymentMethod,
             paymentStatus: "pending",
-            status: "placed",
+            status: paymentMethod === "razorpay" ? "payment_pending" : "placed",
         });
+
+        if (paymentMethod === "razorpay") {
+            payment = await createRazorpayOrder(order);
+            order.razorpayOrderId = payment.id;
+            await order.save();
+        }
 
         const deletedCart = await Cart.findOneAndDelete({
             _id: cart._id,
@@ -147,12 +162,151 @@ const createOrderFromCart = async (userId, addressId) => {
             );
         }
 
-        return order;
+        return { order, payment };
     } catch (error) {
         if (order) await Order.deleteOne({ _id: order._id, user: userId });
         if (reservations.length) await restoreReservations(reservations);
         throw error;
     }
+};
+
+const createOrderFromCart = async (userId, addressId) => {
+    const { order } = await createOrderFromCartWithPayment(userId, addressId, "cod");
+    return order;
+};
+
+const createRazorpayOrderFromCart = async (userId, addressId) => {
+    const result = await createOrderFromCartWithPayment(userId, addressId, "razorpay");
+    return { ...result, keyId: getRazorpayKeyId() };
+};
+
+const createRazorpayPaymentForOrder = async (userId, orderId) => {
+    const order = await Order.findOne({
+        _id: orderId,
+        user: userId,
+        paymentMethod: "razorpay",
+        paymentStatus: "pending",
+        status: "payment_pending",
+    });
+    if (!order) throw new ApiError(409, "This order is not awaiting an online payment.");
+
+    if (order.razorpayOrderId) {
+        const gatewayPayments = await getRazorpayOrderPayments(order.razorpayOrderId);
+        const capturedPayment = gatewayPayments.items?.find((payment) =>
+            payment.status === "captured" &&
+            payment.amount === Math.round(order.totalAmount * 100) &&
+            payment.currency === "INR"
+        );
+        if (capturedPayment) {
+            const paidOrder = await Order.findOneAndUpdate(
+                {
+                    _id: order._id,
+                    user: userId,
+                    status: "payment_pending",
+                    paymentStatus: "pending",
+                    razorpayOrderId: order.razorpayOrderId,
+                },
+                {
+                    $set: {
+                        status: "placed",
+                        paymentStatus: "paid",
+                        razorpayPaymentId: capturedPayment.id,
+                    },
+                },
+                { new: true, runValidators: true },
+            );
+            if (paidOrder) return { order: paidOrder, payment: null, keyId: getRazorpayKeyId(), alreadyPaid: true };
+            const latestOrder = await Order.findOne({ _id: order._id, user: userId });
+            if (latestOrder?.paymentStatus === "paid") {
+                return { order: latestOrder, payment: null, keyId: getRazorpayKeyId(), alreadyPaid: true };
+            }
+            throw new ApiError(409, "This order changed while payment was being checked.");
+        }
+    }
+
+    const payment = order.razorpayOrderId
+        ? {
+            id: order.razorpayOrderId,
+            amount: Math.round(order.totalAmount * 100),
+            currency: "INR",
+        }
+        : await createRazorpayOrder(order);
+    if (!order.razorpayOrderId) {
+        order.razorpayOrderId = payment.id;
+        await order.save();
+    }
+    return { order, payment, keyId: getRazorpayKeyId() };
+};
+
+const verifyRazorpayPaymentForOrder = async (userId, orderId, details) => {
+    const order = await Order.findOne({ _id: orderId, user: userId });
+    if (!order || order.paymentMethod !== "razorpay") {
+        throw new ApiError(404, "Online payment order not found.");
+    }
+
+    if (
+        details.razorpay_order_id !== order.razorpayOrderId ||
+        !verifyRazorpaySignature(
+            details.razorpay_order_id,
+            details.razorpay_payment_id,
+            details.razorpay_signature,
+        )
+    ) {
+        throw new ApiError(400, "Razorpay payment verification failed.");
+    }
+
+    if (order.paymentStatus === "paid") {
+        if (order.razorpayPaymentId !== details.razorpay_payment_id) {
+            throw new ApiError(409, "A different payment is already recorded for this order.");
+        }
+        return order;
+    }
+    if (order.status !== "payment_pending") {
+        throw new ApiError(409, "This order is no longer awaiting payment.");
+    }
+
+    const expectedAmount = Math.round(order.totalAmount * 100);
+    let payment = await getRazorpayPayment(details.razorpay_payment_id);
+    if (
+        payment.order_id !== order.razorpayOrderId ||
+        payment.amount !== expectedAmount ||
+        payment.currency !== "INR"
+    ) {
+        throw new ApiError(400, "The Razorpay payment details do not match this order.");
+    }
+    if (payment.status === "authorized") {
+        payment = await captureRazorpayPayment(details.razorpay_payment_id, expectedAmount);
+    }
+    if (payment.status !== "captured") {
+        throw new ApiError(409, "Payment has not been captured yet. Please retry or contact support.");
+    }
+
+    const updatedOrder = await Order.findOneAndUpdate(
+        {
+            _id: order._id,
+            user: userId,
+            status: "payment_pending",
+            paymentStatus: "pending",
+            razorpayOrderId: details.razorpay_order_id,
+        },
+        {
+            $set: {
+                status: "placed",
+                paymentStatus: "paid",
+                razorpayPaymentId: details.razorpay_payment_id,
+            },
+        },
+        { new: true, runValidators: true },
+    );
+    if (!updatedOrder) {
+        const latestOrder = await Order.findOne({ _id: order._id, user: userId });
+        if (
+            latestOrder?.paymentStatus === "paid" &&
+            latestOrder.razorpayPaymentId === details.razorpay_payment_id
+        ) return latestOrder;
+        throw new ApiError(409, "This order changed while payment was being verified.");
+    }
+    return updatedOrder;
 };
 
 const getUserOrders = async (userId) =>
@@ -165,20 +319,36 @@ const getUserOrder = async (userId, orderId) => {
 };
 
 const cancelPlacedOrder = async ({ orderId, userId }) => {
-    const filter = { _id: orderId, status: "placed" };
-    if (userId) filter.user = userId;
-
-    const order = await Order.findOneAndUpdate(
-        filter,
+    const ownerFilter = userId ? { user: userId } : {};
+    let order = await Order.findOneAndUpdate(
+        {
+            _id: orderId,
+            ...ownerFilter,
+            status: "payment_pending",
+            paymentMethod: "razorpay",
+            paymentStatus: "pending",
+        },
         { $set: { status: "cancelled", cancelledAt: new Date() } },
         { new: true }
     );
+    if (!order) {
+        order = await Order.findOneAndUpdate(
+            {
+                _id: orderId,
+                ...ownerFilter,
+                status: "placed",
+                $or: [{ paymentMethod: "cod" }, { paymentStatus: { $ne: "paid" } }],
+            },
+            { $set: { status: "cancelled", cancelledAt: new Date() } },
+            { new: true }
+        );
+    }
     if (!order) {
         const existingFilter = { _id: orderId };
         if (userId) existingFilter.user = userId;
         const existing = await Order.exists(existingFilter);
         if (!existing) throw new ApiError(404, "Order not found.");
-        throw new ApiError(409, "This order can no longer be cancelled.");
+        throw new ApiError(409, "This order can no longer be cancelled. Paid Razorpay orders require a refund.");
     }
 
     try {
@@ -210,7 +380,10 @@ const cancelAdminOrder = async (orderId) => cancelPlacedOrder({ orderId });
 export {
     cancelAdminOrder,
     cancelUserOrder,
+    createRazorpayOrderFromCart,
+    createRazorpayPaymentForOrder,
     createOrderFromCart,
     getUserOrder,
     getUserOrders,
+    verifyRazorpayPaymentForOrder,
 };

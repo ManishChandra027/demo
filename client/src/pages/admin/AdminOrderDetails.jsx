@@ -61,8 +61,15 @@ const AdminOrderDetails = () => {
   if (loading) return <div className="flex min-h-64 items-center justify-center"><Loader label="Loading order" /></div>;
   if (error || !order) return <section className="space-y-4"><Link to="/admin/orders" className="inline-flex items-center gap-2 text-sm font-semibold text-rarewolf-primary"><ArrowLeft size={16} />Back to orders</Link><div role="alert" className="rounded-xl border border-danger/30 bg-white p-5 text-sm text-danger">{error || "Order not found."} <Button size="sm" variant="secondary" className="ml-3" onClick={() => { setLoading(true); setRetryKey((key) => key + 1); }}>Retry</Button></div></section>;
 
-  const actions = order.status === "placed"
-    ? [{ status: "processing", label: "Process order", variant: "primary" }, { status: "cancelled", label: "Cancel order", variant: "danger" }]
+  const actions = order.status === "payment_pending"
+    ? [{ status: "cancelled", label: "Cancel order", variant: "danger" }]
+    : order.status === "placed"
+    ? [
+      { status: "processing", label: "Process order", variant: "primary" },
+      ...(order.paymentMethod !== "razorpay" || order.paymentStatus !== "paid"
+        ? [{ status: "cancelled", label: "Cancel order", variant: "danger" }]
+        : []),
+    ]
     : order.status === "processing"
       ? [{ status: "shipped", label: "Mark shipped", variant: "primary" }]
       : order.status === "shipped"
@@ -81,7 +88,7 @@ const AdminOrderDetails = () => {
           <section className="rounded-xl border border-line bg-white p-5 shadow-card"><h2 className="font-bold text-ink">Delivery address snapshot</h2><p className="mt-3 font-semibold text-ink">{address.fullName}</p><p className="mt-1 text-sm leading-6 text-ink-secondary">{address.addressLine1}<br />{[address.city, address.state, address.pinCode].filter(Boolean).join(", ")}<br />{address.country}</p><p className="mt-2 text-sm text-ink-secondary">{address.phone}</p></section>
         </div>
 
-        <aside className="space-y-5"><section className="rounded-xl border border-line bg-white p-5 shadow-card"><h2 className="font-bold text-ink">Customer</h2><p className="mt-3 font-medium text-ink">{order.user?.fullName || "Customer"}</p><p className="mt-1 break-all text-sm text-ink-secondary">{order.user?.email || "—"}</p></section><section className="rounded-xl border border-line bg-white p-5 shadow-card"><h2 className="font-bold text-ink">Status and payment</h2><dl className="mt-3 space-y-3 text-sm"><div className="flex justify-between gap-3"><dt className="text-ink-secondary">Order status</dt><dd className="font-semibold capitalize text-ink">{order.status}</dd></div><div className="flex justify-between gap-3"><dt className="text-ink-secondary">Payment method</dt><dd className="font-semibold uppercase text-ink">{order.paymentMethod}</dd></div><div className="flex justify-between gap-3"><dt className="text-ink-secondary">Payment status</dt><dd className="font-semibold capitalize text-ink">{order.paymentStatus}</dd></div></dl><p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-ink-muted">Payment status is read-only. COD payment remains pending until payment is verified through a separate payment process.</p></section></aside>
+        <aside className="space-y-5"><section className="rounded-xl border border-line bg-white p-5 shadow-card"><h2 className="font-bold text-ink">Customer</h2><p className="mt-3 font-medium text-ink">{order.user?.fullName || "Customer"}</p><p className="mt-1 break-all text-sm text-ink-secondary">{order.user?.email || "—"}</p></section><section className="rounded-xl border border-line bg-white p-5 shadow-card"><h2 className="font-bold text-ink">Status and payment</h2><dl className="mt-3 space-y-3 text-sm"><div className="flex justify-between gap-3"><dt className="text-ink-secondary">Order status</dt><dd className="font-semibold capitalize text-ink">{order.status.replace("_", " ")}</dd></div><div className="flex justify-between gap-3"><dt className="text-ink-secondary">Payment method</dt><dd className="font-semibold uppercase text-ink">{order.paymentMethod}</dd></div><div className="flex justify-between gap-3"><dt className="text-ink-secondary">Payment status</dt><dd className="font-semibold capitalize text-ink">{order.paymentStatus}</dd></div></dl><p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-ink-muted">Online payments are verified by the server before an order is marked paid. COD remains pending until collected.</p></section></aside>
       </div>
     </section>
   );

@@ -8,6 +8,7 @@ import {
 } from "../src/services/adminOperations.service.js";
 import {
     adminLowStockQuerySchema,
+    adminOrderListSchema,
     adminOrderStatusSchema,
     adminStockAdjustmentSchema,
 } from "../src/validations/admin.validation.js";
@@ -24,6 +25,7 @@ test("inventory and order inputs reject unsafe values and default low-stock thre
         assert.ok(adminStockAdjustmentSchema.validate({ adjustment }).error);
     }
     assert.equal(adminLowStockQuerySchema.validate({}).value.threshold, 5);
+    assert.equal(adminOrderListSchema.validate({ status: "payment_pending" }).error, undefined);
     assert.ok(adminOrderStatusSchema.validate({ status: "paid" }).error);
     assert.ok(adminOrderStatusSchema.validate({ status: "shipped", paymentStatus: "paid" }).error);
 });
